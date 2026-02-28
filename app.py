@@ -4,29 +4,51 @@ from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from google import genai
 from datetime import datetime, timedelta
+import os
 
 # --- INITIALIZATION ---
+# Hardcoded for development as requested
 client = genai.Client(api_key="AIzaSyCMij2fGZCpHpM_5dfr-5Vx0UwqtgwhptA")
 
 app = Flask(__name__)
 app.secret_key = "development_key_123"
 
+# --- DATABASE CONFIG ---
+# Fix for SQLAlchemy requiring 'postgresql://' prefix
+raw_uri = 'postgresql://neondb_owner:npg_eKw84vUXxYLP@ep-nameless-tooth-aihj4z15-pooler.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
+if raw_uri.startswith("postgres://"):
+    raw_uri = raw_uri.replace("postgres://", "postgresql://", 1)
+
 app.config.update(
-    SQLALCHEMY_DATABASE_URI='postgresql://neondb_owner:npg_eKw84vUXxYLP@ep-nameless-tooth-aihj4z15-pooler.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require',
+    SQLALCHEMY_DATABASE_URI=raw_uri,
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
-    SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=False, 
-    SESSION_COOKIE_HTTPONLY=False 
+    
+    # PRODUCTION COOKIE SETTINGS (Required for Vercel + Render)
+    SESSION_COOKIE_SAMESITE="None", # Allows cross-domain cookies
+    SESSION_COOKIE_SECURE=True,     # Required for Samesite="None" (HTTPS)
+    SESSION_COOKIE_HTTPONLY=True
 )
 
 db = SQLAlchemy(app)
-CORS(app, supports_credentials=True, origins=["http://localhost:3000"])
+
+# --- CORS CONFIGURATION ---
+# Add your specific Vercel URL to the 'origins' list after you deploy the frontend
+allowed_origins = [
+    "http://localhost:3000",
+    "https://microhabit-ai.vercel.app" # Example: Replace with your actual Vercel link
+]
+
+CORS(app, 
+     supports_credentials=True, 
+     origins=allowed_origins,
+     allow_headers=["Content-Type", "Authorization"],
+     methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"])
 
 # --- MODELS ---
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
-    # INCREASE THIS FROM 120 TO 255
+    # 255 length to avoid truncation with scrypt hashes on Postgres
     password = db.Column(db.String(255), nullable=False) 
     habits = db.relationship('Habit', backref='user', lazy=True)
 
@@ -39,7 +61,7 @@ class Habit(db.Model):
 class CompletionLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     habit_id = db.Column(db.Integer, db.ForeignKey('habit.id'), nullable=False)
-    # FIX: Pass the function itself (datetime.utcnow().date) so it evaluates on every insert
+    # Using lambda ensures the date is captured at the moment of insertion
     date = db.Column(db.Date, default=lambda: datetime.utcnow().date())
 
 with app.app_context():
@@ -103,7 +125,6 @@ def toggle_habit(id):
     today = datetime.utcnow().date()
     
     if habit.completed:
-        # Avoid duplicate logs for the same day if the user toggles multiple times
         existing_log = CompletionLog.query.filter_by(habit_id=id, date=today).first()
         if not existing_log:
             new_log = CompletionLog(habit_id=id, date=today)
@@ -121,7 +142,6 @@ def delete_habit(id):
     if not habit:
         return jsonify({"error": "Habit not found"}), 404
     
-    # Delete associated logs first (Cascade delete manually)
     CompletionLog.query.filter_by(habit_id=id).delete()
     db.session.delete(habit)
     db.session.commit()
@@ -134,11 +154,8 @@ def reset_habits():
         return jsonify({"error": "Unauthorized"}), 401
     
     today = datetime.utcnow().date()
-
-    # 1. Reset checkbox status
     Habit.query.filter_by(user_id=user_id).update({Habit.completed: False})
 
-    # 2. Reset history counts for today specifically
     db.session.query(CompletionLog).filter(
         CompletionLog.habit_id.in_(
             db.session.query(Habit.id).filter_by(user_id=user_id)
@@ -166,7 +183,7 @@ def ai_coach():
         return jsonify({"advice": response.text})
     except Exception as e:
         print(f"DEBUG AI ERROR: {e}") 
-        return jsonify({"error": "AI Coach is currently over-caffeinated."}), 500
+        return jsonify({"error": "AI Coach is currently offline."}), 500
 
 # --- HISTORY ROUTE ---
 @app.route('/api/history', methods=['GET'])
@@ -185,5 +202,9 @@ def get_history():
     history_data = {str(log[0]): log[1] for log in logs}
     return jsonify(history_data)
 
+# --- STARTUP LOGIC ---
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # Render provides the PORT variable; default to 5000 for local testing
+    port = int(os.environ.get("PORT", 5000))
+    # 0.0.0.0 allows the app to be accessible on the network/internet
+    app.run(host='0.0.0.0', port=port)
