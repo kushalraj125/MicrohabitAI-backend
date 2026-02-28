@@ -7,17 +7,17 @@ from datetime import datetime, timedelta
 import os
 
 # --- INITIALIZATION ---
-client = genai.Client(api_key="AIzaSyCMij2fGZCpHpM_5dfr-5Vx0UwqtgwhptA")
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
 app = Flask(__name__)
-app.secret_key = "development_key_123"
+app.secret_key = os.environ.get("SECRET_KEY", "default_secret_key")
 
 # --- DATABASE CONFIG ---
-raw_uri = 'postgresql://neondb_owner:npg_eKw84vUXxYLP@ep-nameless-tooth-aihj4z15-pooler.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
+raw_uri = os.environ.get("DATABASE_URL", 'postgresql://neondb_owner:npg_eKw84vUXxYLP@ep-nameless-tooth-aihj4z15-pooler.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require')  # Default to SQLite for local dev
 if raw_uri.startswith("postgres://"):
     raw_uri = raw_uri.replace("postgres://", "postgresql://", 1)
 
-app.config.update(
+app.config.update(  
     SQLALCHEMY_DATABASE_URI=raw_uri,
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
     
