@@ -2,7 +2,8 @@
 name = "microhabit-ai-backend"
 version = "0.1.0"
 description = "Flask backend for AI-powered habit tracking"
-requires-python = ">=3.12"
+# Use 3.10 here to match your preference
+requires-python = ">=3.10"
 dependencies = [
     "flask>=3.1.0",
     "flask-sqlalchemy>=3.1.1",
@@ -21,7 +22,8 @@ dependencies = [
 
 [tool.uv]
 managed = true
-package = false # <--- THIS IS THE CRITICAL FIX
+# This stops the "Unable to determine which files to ship" error
+package = false 
 
 [build-system]
 requires = ["hatchling"]
