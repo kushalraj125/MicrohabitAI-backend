@@ -1,0 +1,30 @@
+# --- Environment & uv ---
+.venv/
+.uv/
+# Ignore any other standard virtualenv names
+venv/
+env/
+
+# --- Databases & Secrets ---
+# Keep your Neon DB connection strings and secret keys private
+.env
+# Ignore local SQLite files if you switch back for testing
+*.db
+*.sqlite3
+
+# --- Python Internals ---
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Logs ---
+*.log
+logs/
+
+# --- OS & IDE ---
+.DS_Store
+.vscode/
+.idea/
