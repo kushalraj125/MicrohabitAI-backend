@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, session
+from flask import Flask, request, jsonify, session, make_response
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -7,14 +7,12 @@ from datetime import datetime, timedelta
 import os
 
 # --- INITIALIZATION ---
-# Hardcoded for development as requested
 client = genai.Client(api_key="AIzaSyCMij2fGZCpHpM_5dfr-5Vx0UwqtgwhptA")
 
 app = Flask(__name__)
 app.secret_key = "development_key_123"
 
 # --- DATABASE CONFIG ---
-# Fix for SQLAlchemy requiring 'postgresql://' prefix
 raw_uri = 'postgresql://neondb_owner:npg_eKw84vUXxYLP@ep-nameless-tooth-aihj4z15-pooler.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
 if raw_uri.startswith("postgres://"):
     raw_uri = raw_uri.replace("postgres://", "postgresql://", 1)
@@ -23,7 +21,7 @@ app.config.update(
     SQLALCHEMY_DATABASE_URI=raw_uri,
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
     
-    # PRODUCTION COOKIE SETTINGS (Required for Vercel + Render)
+    # PRODUCTION COOKIE SETTINGS (Critical for Vercel + Render)
     SESSION_COOKIE_SAMESITE="None", # Allows cross-domain cookies
     SESSION_COOKIE_SECURE=True,     # Required for Samesite="None" (HTTPS)
     SESSION_COOKIE_HTTPONLY=True
@@ -32,10 +30,9 @@ app.config.update(
 db = SQLAlchemy(app)
 
 # --- CORS CONFIGURATION ---
-# Add your specific Vercel URL to the 'origins' list after you deploy the frontend
 allowed_origins = [
     "http://localhost:3000",
-    "https://microhabit-ai.vercel.app" # Example: Replace with your actual Vercel link
+    "https://microhabit-ai-frontend.vercel.app" # Updated with your actual Vercel link
 ]
 
 CORS(app, 
@@ -44,11 +41,16 @@ CORS(app,
      allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"])
 
+# --- PRE-FLIGHT HANDLER ---
+# This ensures that 'OPTIONS' requests are handled before auth logic triggers
+@app.route('/api/<path:path>', methods=['OPTIONS'])
+def options_handler(path):
+    return jsonify({"status": "ok"}), 200
+
 # --- MODELS ---
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
-    # 255 length to avoid truncation with scrypt hashes on Postgres
     password = db.Column(db.String(255), nullable=False) 
     habits = db.relationship('Habit', backref='user', lazy=True)
 
@@ -61,7 +63,6 @@ class Habit(db.Model):
 class CompletionLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     habit_id = db.Column(db.Integer, db.ForeignKey('habit.id'), nullable=False)
-    # Using lambda ensures the date is captured at the moment of insertion
     date = db.Column(db.Date, default=lambda: datetime.utcnow().date())
 
 with app.app_context():
@@ -86,6 +87,7 @@ def login():
     user = User.query.filter_by(username=data['username']).first()
     if user and check_password_hash(user.password, data['password']):
         session['user_id'] = user.id
+        session.modified = True # Ensure cookie is sent
         return jsonify({"message": "Logged in", "user": user.username})
     return jsonify({"error": "Invalid username or password"}), 401
 
@@ -173,10 +175,10 @@ def ai_coach():
     habits = Habit.query.filter_by(user_id=user_id).all()
     
     if not habits:
-        return jsonify({"advice": "Add some habits first, then I'll give you a strategy!"})
+        return jsonify({"advice": "Add some habits first!"})
 
     habit_list = [f"{h.name} ({'Done' if h.completed else 'Pending'})" for h in habits]
-    prompt = f"User Habits today: {', '.join(habit_list)}. Give a clever, 2-sentence piece of advice to help them stay on track."
+    prompt = f"User Habits today: {', '.join(habit_list)}. Give a clever, 2-sentence piece of advice."
     
     try:
         response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
@@ -204,7 +206,5 @@ def get_history():
 
 # --- STARTUP LOGIC ---
 if __name__ == '__main__':
-    # Render provides the PORT variable; default to 5000 for local testing
     port = int(os.environ.get("PORT", 5000))
-    # 0.0.0.0 allows the app to be accessible on the network/internet
     app.run(host='0.0.0.0', port=port)
